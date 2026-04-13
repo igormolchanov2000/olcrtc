@@ -36,6 +36,50 @@ var (
 	errStartTimedOut      = errors.New("olcRTC start timed out")
 )
 
+// Runtime exposes the singleton olcRTC mobile lifecycle via gomobile-friendly instance methods.
+// Multiple Runtime instances share the same underlying process state.
+type Runtime struct{}
+
+// NewRuntime creates a gomobile-bindable runtime handle.
+func NewRuntime() *Runtime {
+	return &Runtime{}
+}
+
+// SetProtector sets the Android VPN socket protector.
+func (r *Runtime) SetProtector(p SocketProtector) {
+	SetProtector(p)
+}
+
+// SetLogWriter sets a custom log writer for olcRTC output.
+func (r *Runtime) SetLogWriter(w LogWriter) {
+	SetLogWriter(w)
+}
+
+// SetDebug enables or disables verbose logging.
+func (r *Runtime) SetDebug(enabled bool) {
+	SetDebug(enabled)
+}
+
+// Start launches the olcRTC client in background.
+func (r *Runtime) Start(roomID, keyHex string, socksPort int, duo bool, socksUser, socksPass string) error {
+	return Start(roomID, keyHex, socksPort, duo, socksUser, socksPass)
+}
+
+// WaitReady blocks until the Telemost peers are connected and the local SOCKS5 listener is ready.
+func (r *Runtime) WaitReady(timeoutMillis int) error {
+	return WaitReady(timeoutMillis)
+}
+
+// Stop gracefully stops the olcRTC client.
+func (r *Runtime) Stop() {
+	Stop()
+}
+
+// IsRunning returns true if the olcRTC client is active.
+func (r *Runtime) IsRunning() bool {
+	return IsRunning()
+}
+
 //nolint:gochecknoglobals // Mobile bindings expose a singleton runtime controlled by the embedding app.
 var (
 	mu     sync.Mutex

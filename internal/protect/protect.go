@@ -30,13 +30,43 @@ func controlFunc(network, _ string, c syscall.RawConn) error {
 	return err
 }
 
-// NewDialer returns a net.Dialer that calls Protector on each new socket.
-func NewDialer() *net.Dialer {
+var protectedDNSServers = []string{
+	"77.88.8.8:53",
+	"77.88.8.1:53",
+	"1.1.1.1:53",
+	"8.8.8.8:53",
+}
+
+func newBaseDialer() *net.Dialer {
 	return &net.Dialer{
 		Timeout:   10 * time.Second,
 		KeepAlive: 30 * time.Second,
 		Control:   controlFunc,
 	}
+}
+
+func newResolver() *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			dialer := newBaseDialer()
+			for _, dnsServer := range protectedDNSServers {
+				conn, err := dialer.DialContext(ctx, network, dnsServer)
+				if err == nil {
+					return conn, nil
+				}
+			}
+
+			return dialer.DialContext(ctx, network, address)
+		},
+	}
+}
+
+// NewDialer returns a net.Dialer that calls Protector on each new socket.
+func NewDialer() *net.Dialer {
+	dialer := newBaseDialer()
+	dialer.Resolver = newResolver()
+	return dialer
 }
 
 // NewHTTPClient returns an http.Client using protected sockets.
@@ -47,7 +77,7 @@ func NewHTTPClient() *http.Client {
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          10,
 		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:  10 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 	}
 	return &http.Client{Transport: transport}
