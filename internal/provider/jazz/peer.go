@@ -98,6 +98,11 @@ func (p *Peer) Connect(ctx context.Context) error {
 	settingEngine := webrtc.SettingEngine{}
 	if protect.Protector != nil {
 		settingEngine.SetICEProxyDialer(protect.NewProxyDialer())
+		transportNet, err := protect.NewTransportNet()
+		if err != nil {
+			return fmt.Errorf("create protected transport net: %w", err)
+		}
+		settingEngine.SetNet(transportNet)
 	}
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 
