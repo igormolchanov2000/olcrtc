@@ -12,6 +12,7 @@ import (
 	"github.com/openlibrecommunity/olcrtc/internal/client"
 	"github.com/openlibrecommunity/olcrtc/internal/logger"
 	"github.com/openlibrecommunity/olcrtc/internal/protect"
+	"github.com/openlibrecommunity/olcrtc/internal/runtimecfg"
 
 	_ "golang.org/x/mobile/bind" // ensure gomobile bind is available
 )
@@ -28,12 +29,14 @@ type LogWriter interface {
 }
 
 var (
-	errAlreadyRunning     = errors.New("olcRTC already running")
-	errRoomIDRequired     = errors.New("roomID is required")
-	errKeyHexRequired     = errors.New("keyHex is required")
-	errNotRunning         = errors.New("olcRTC is not running")
-	errStoppedBeforeReady = errors.New("olcRTC stopped before becoming ready")
-	errStartTimedOut      = errors.New("olcRTC start timed out")
+	errAlreadyRunning      = errors.New("olcRTC already running")
+	errProviderRequired    = errors.New("provider is required")
+	errUnsupportedProvider = errors.New("unsupported provider")
+	errRoomIDRequired      = errors.New("roomID is required")
+	errKeyHexRequired      = errors.New("keyHex is required")
+	errNotRunning          = errors.New("olcRTC is not running")
+	errStoppedBeforeReady  = errors.New("olcRTC stopped before becoming ready")
+	errStartTimedOut       = errors.New("olcRTC start timed out")
 )
 
 // Runtime exposes the singleton olcRTC mobile lifecycle via gomobile-friendly instance methods.
@@ -61,11 +64,11 @@ func (r *Runtime) SetDebug(enabled bool) {
 }
 
 // Start launches the olcRTC client in background.
-func (r *Runtime) Start(roomID, keyHex string, socksPort int, duo bool, socksUser, socksPass string) error {
-	return Start(roomID, keyHex, socksPort, duo, socksUser, socksPass)
+func (r *Runtime) Start(providerName, roomID, keyHex string, socksPort int, socksUser, socksPass string) error {
+	return Start(providerName, roomID, keyHex, socksPort, socksUser, socksPass)
 }
 
-// WaitReady blocks until the Telemost peers are connected and the local SOCKS5 listener is ready.
+// WaitReady blocks until the selected provider is connected and the local SOCKS5 listener is ready.
 func (r *Runtime) WaitReady(timeoutMillis int) error {
 	return WaitReady(timeoutMillis)
 }
@@ -82,11 +85,12 @@ func (r *Runtime) IsRunning() bool {
 
 //nolint:gochecknoglobals // Mobile bindings expose a singleton runtime controlled by the embedding app.
 var (
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	done   chan struct{}
-	ready  chan struct{}
-	errRun error
+	mu           sync.Mutex
+	cancel       context.CancelFunc
+	done         chan struct{}
+	ready        chan struct{}
+	errRun       error
+	registerOnce sync.Once
 )
 
 // SetProtector sets the Android VPN socket protector.
@@ -120,24 +124,32 @@ func SetDebug(enabled bool) {
 }
 
 // Start launches the olcRTC client in background.
-// roomID: Telemost room ID (e.g. "xxx-xxx-xxx")
+// providerName: provider identifier (`telemost`, `jazz`, or `salutejazz` alias)
+// roomID: provider-specific session identifier
 // keyHex: 64-char hex encryption key
 // socksPort: local SOCKS5 proxy port (e.g. 10808)
 // socksUser/socksPass: SOCKS5 credentials (empty = no auth).
-func Start(roomID, keyHex string, socksPort int, socksUser, socksPass string) error {
+func Start(providerName, roomID, keyHex string, socksPort int, socksUser, socksPass string) error {
+	registerOnce.Do(runtimecfg.RegisterProviders)
+	providerName = runtimecfg.NormalizeProviderName(providerName)
+
 	mu.Lock()
 	defer mu.Unlock()
 
 	switch {
 	case cancel != nil:
 		return errAlreadyRunning
+	case providerName == "":
+		return errProviderRequired
+	case !runtimecfg.IsSupportedProvider(providerName):
+		return errUnsupportedProvider
 	case roomID == "":
 		return errRoomIDRequired
 	case keyHex == "":
 		return errKeyHexRequired
 	}
 
-	roomURL := "https://telemost.yandex.ru/j/" + roomID
+	roomURL := runtimecfg.BuildRoomURL(providerName, roomID)
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	cancel = cancelFunc
@@ -152,7 +164,7 @@ func Start(roomID, keyHex string, socksPort int, socksUser, socksPass string) er
 
 		err := client.RunWithReady(
 			ctx,
-			"telemost",
+			providerName,
 			roomURL,
 			keyHex,
 			socksPort,
@@ -176,7 +188,7 @@ func Start(roomID, keyHex string, socksPort int, socksUser, socksPass string) er
 	return nil
 }
 
-// WaitReady blocks until the Telemost peers are connected and the local SOCKS5 listener is ready.
+// WaitReady blocks until the selected provider peers are connected and the local SOCKS5 listener is ready.
 //
 //nolint:cyclop // The control flow is intentionally linear so mobile callers can observe each startup state clearly.
 func WaitReady(timeoutMillis int) error {

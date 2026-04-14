@@ -17,8 +17,7 @@ import (
 	"github.com/openlibrecommunity/olcrtc/internal/logger"
 	"github.com/openlibrecommunity/olcrtc/internal/names"
 	"github.com/openlibrecommunity/olcrtc/internal/provider"
-	"github.com/openlibrecommunity/olcrtc/internal/provider/jazz"
-	"github.com/openlibrecommunity/olcrtc/internal/provider/telemost"
+	"github.com/openlibrecommunity/olcrtc/internal/runtimecfg"
 	"github.com/openlibrecommunity/olcrtc/internal/server"
 )
 
@@ -51,10 +50,10 @@ func main() {
 }
 
 func run() error {
-	provider.Register("jazz", jazz.New)
-	provider.Register("telemost", telemost.New)
+	runtimecfg.RegisterProviders()
 
 	cfg := parseFlags()
+	cfg.provider = runtimecfg.NormalizeProviderName(cfg.provider)
 	configureLogging(cfg.debug)
 
 	if err := validateConfig(cfg); err != nil {
@@ -120,18 +119,11 @@ func configureLogging(debug bool) {
 
 func validateConfig(cfg config) error {
 	available := provider.Available()
-	validProvider := false
-	for _, p := range available {
-		if cfg.provider == p {
-			validProvider = true
-			break
-		}
-	}
 
 	switch {
 	case cfg.provider == "":
 		return errProviderRequired
-	case !validProvider:
+	case !runtimecfg.IsSupportedProvider(cfg.provider):
 		return fmt.Errorf("%w: %s (available: %v)", errUnsupportedProvider, cfg.provider, available)
 	case cfg.roomID == "":
 		return errRoomIDRequired
@@ -166,7 +158,7 @@ func loadNames(dataDir string) error {
 }
 
 func runMode(ctx context.Context, cfg config, errCh chan<- error) {
-	roomURL := buildRoomURL(cfg.provider, cfg.roomID)
+	roomURL := runtimecfg.BuildRoomURL(cfg.provider, cfg.roomID)
 
 	switch cfg.mode {
 	case "srv":
@@ -190,20 +182,6 @@ func runMode(ctx context.Context, cfg config, errCh chan<- error) {
 			"",
 			"",
 		)
-	}
-}
-
-func buildRoomURL(providerName, roomID string) string {
-	switch providerName {
-	case "telemost":
-		return "https://telemost.yandex.ru/j/" + roomID
-	case "jazz":
-		if roomID == "" {
-			return "any"
-		}
-		return roomID
-	default:
-		return roomID
 	}
 }
 
